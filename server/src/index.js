@@ -1,11 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import { nanoid } from 'nanoid';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -21,12 +16,6 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json());
-
-// Serve static files from client build in production
-if (NODE_ENV === 'production') {
-  const clientPath = path.join(__dirname, '../../client/dist');
-  app.use(express.static(clientPath));
-}
 
 // In-memory data storage
 /**
@@ -174,17 +163,54 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
-// Serve React app for all other routes
-if (NODE_ENV === 'production') {
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(clientPath, 'index.html'));
+// Serve a simple HTML page for the root route
+app.get('/', (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>GLF Stat - Golf Statistics</title>
+        <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f7; }
+            .container { max-width: 600px; margin: 0 auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            h1 { color: #1d1d1f; margin-bottom: 20px; }
+            p { color: #86868b; line-height: 1.6; }
+            .api-link { display: inline-block; background: #007aff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; margin-top: 20px; }
+            .status { background: #f2f2f7; padding: 15px; border-radius: 8px; margin: 20px 0; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🏌️ GLF Stat</h1>
+            <p>Golf Statistics Tracking Application</p>
+            
+            <div class="status">
+                <strong>Status:</strong> API Server Running ✅<br>
+                <strong>Environment:</strong> ${NODE_ENV}<br>
+                <strong>Timestamp:</strong> ${new Date().toISOString()}
+            </div>
+            
+            <p>This is the API server for the GLF Stat golf statistics application. The React frontend should be deployed separately.</p>
+            
+            <a href="/api/health" class="api-link">Check API Health</a>
+            <a href="/api" class="api-link" style="margin-left: 10px;">API Status</a>
+        </div>
+    </body>
+    </html>
+  `);
+});
+
+// Only start the server if this file is run directly
+if (import.meta.url === `file://${process.argv[1]}`) {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server listening on http://localhost:${PORT}`);
+    console.log(`🌍 Environment: ${NODE_ENV}`);
+    console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server listening on http://localhost:${PORT}`);
-  console.log(`🌍 Environment: ${NODE_ENV}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
-});
+export default app;
 
 
