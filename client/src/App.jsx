@@ -2,8 +2,7 @@ import { BrowserRouter, Routes, Route, Link, useParams, useNavigate } from 'reac
 import { useEffect, useMemo, useState } from 'react'
 
 // API URL configuration for different environments
-const API_URL = import.meta.env.VITE_API_URL || 
-  (import.meta.env.PROD ? window.location.origin + '/api' : 'http://localhost:4000/api')
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api'
 
 async function api(path, options) {
   const res = await fetch(`${API_URL}${path}`, {
