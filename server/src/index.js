@@ -194,7 +194,7 @@ app.post('/api/rounds/:id/holes/:holeId/shots', async (req, res) => {
   if (!round) return;
 
   const { holeId } = req.params;
-  const { shotNumber, playerId, club, distance, result, location, targetLocation } = req.body || {};
+  const { shotNumber, playerId, club, distance, result, location, targetLocation, error, isPenalty } = req.body || {};
 
   if (!round.holes[holeId]) {
     return res.status(400).json({ error: 'Invalid holeId. Must be 1-18' });
@@ -202,22 +202,37 @@ app.post('/api/rounds/:id/holes/:holeId/shots', async (req, res) => {
   if (!playerId || !club || typeof distance !== 'number' || !['success', 'fail'].includes(result)) {
     return res.status(400).json({ error: 'Missing/invalid fields: playerId, club, distance (number), result (success|fail)' });
   }
+
+  // Validate error field for failed shots
+  if (result === 'fail' && !error) {
+    return res.status(400).json({ error: 'Error field is required for failed shots' });
+  }
+
+  const validErrors = ['ground', 'top_shot', 'slice', 'hook', 'shank', 'direction', 'chunk', 'thin', 'too_far', 'other'];
+  if (error && !validErrors.includes(error)) {
+    return res.status(400).json({ error: 'Invalid error. Must be one of: ground, top_shot, slice, hook, shank, direction, chunk, thin, too_far, other' });
+  }
   
   // Validate player is part of this round
   if (!round.players.includes(playerId)) {
     return res.status(400).json({ error: 'Player is not part of this round' });
   }
   
-  const validLocations = ['tee', 'left_rough', 'right_rough', 'fairway', 'left_woods', 'right_woods', 'green', 'other'];
+  const validLocations = ['tee', 'left_rough', 'right_rough', 'fairway', 'left_woods', 'right_woods', 'green', 'pre_green', 'other'];
+  const validTargetLocations = ['tee', 'left_rough', 'right_rough', 'fairway', 'left_woods', 'right_woods', 'green', 'lake', 'pre_green', 'hole', 'other'];
   if (location && !validLocations.includes(location)) {
-    return res.status(400).json({ error: 'Invalid location. Must be one of: tee, left_rough, right_rough, fairway, left_woods, right_woods, green, other' });
+    return res.status(400).json({ error: 'Invalid location. Must be one of: tee, left_rough, right_rough, fairway, left_woods, right_woods, green, pre_green, other' });
   }
-  if (targetLocation && !validLocations.includes(targetLocation)) {
-    return res.status(400).json({ error: 'Invalid targetLocation. Must be one of: tee, left_rough, right_rough, fairway, left_woods, right_woods, green, other' });
-  }
+      if (targetLocation && !validTargetLocations.includes(targetLocation)) {
+      return res.status(400).json({ error: 'Invalid targetLocation. Must be one of: tee, left_rough, right_rough, fairway, left_woods, right_woods, green, lake, pre_green, hole, other' });
+    }
 
   const shots = round.holes[holeId];
-  const nextShotNumber = typeof shotNumber === 'number' ? shotNumber : shots.length + 1;
+  
+  // Calculate shot number for this specific player
+  const playerShots = shots.filter(s => s.playerId === playerId);
+  const nextShotNumber = typeof shotNumber === 'number' ? shotNumber : playerShots.length + 1;
+  
   const shot = { 
     shotNumber: nextShotNumber, 
     playerId, 
@@ -225,8 +240,14 @@ app.post('/api/rounds/:id/holes/:holeId/shots', async (req, res) => {
     distance, 
     result, 
     location: location || 'other',
-    targetLocation: targetLocation || 'other'
+    targetLocation: targetLocation || 'other',
+    isPenalty: isPenalty || false
   };
+
+  // Add error field only for failed shots
+  if (result === 'fail') {
+    shot.error = error;
+  }
   shots.push(shot);
   await saveData(rounds, players);
   return res.status(201).json({ holeId, shot });
@@ -260,16 +281,22 @@ app.delete('/api/rounds/:id/holes/:holeId/shots/last', async (req, res) => {
 function computeRoundStats(round) {
   let total = 0;
   let success = 0;
+  let penalties = 0;
   Object.values(round.holes).forEach((shots) => {
     shots.forEach((s) => {
-      total += 1;
-      if (s.result === 'success') success += 1;
+      if (!s.isPenalty) {
+        total += 1;
+        if (s.result === 'success') success += 1;
+      } else {
+        penalties += 1;
+      }
     });
   });
   const failed = total - success;
   const percent = (n) => (total === 0 ? 0 : Math.round((n / total) * 100));
   return {
     totalShots: total,
+    totalPenalties: penalties,
     successPercent: percent(success),
     failPercent: percent(failed),
   };
@@ -279,8 +306,11 @@ function computeClubStats(round) {
   const byClub = new Map();
   Object.values(round.holes).forEach((shots) => {
     shots.forEach((s) => {
-      if (!byClub.has(s.club)) byClub.set(s.club, []);
-      byClub.get(s.club).push(s);
+      // Exclude penalty shots from club statistics
+      if (!s.isPenalty) {
+        if (!byClub.has(s.club)) byClub.set(s.club, []);
+        byClub.get(s.club).push(s);
+      }
     });
   });
 
@@ -299,9 +329,12 @@ function computeLocationStats(round) {
   const byLocation = new Map();
   Object.values(round.holes).forEach((shots) => {
     shots.forEach((s) => {
-      const location = s.location || 'other';
-      if (!byLocation.has(location)) byLocation.set(location, []);
-      byLocation.get(location).push(s);
+      // Exclude penalty shots from location statistics
+      if (!s.isPenalty) {
+        const location = s.location || 'other';
+        if (!byLocation.has(location)) byLocation.set(location, []);
+        byLocation.get(location).push(s);
+      }
     });
   });
 

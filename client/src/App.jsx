@@ -10,9 +10,28 @@ function getLocationName(location) {
     'left_woods': 'Левый лес',
     'right_woods': 'Правый лес',
     'green': 'Грин',
+    'lake': 'Озеро',
+    'pre_green': 'Прегрин',
+    'hole': 'Лунка',
     'other': 'Другое'
   }
   return locationNames[location] || 'Другое'
+}
+
+function getErrorName(error) {
+  const errorNames = {
+    'ground': 'Земля',
+    'top_shot': 'Удар сверху',
+    'slice': 'Слайс',
+    'hook': 'Хук',
+    'shank': 'Срез вбок',
+    'direction': 'Направление',
+    'chunk': 'Зажал',
+    'thin': 'Ребром',
+    'too_far': 'Слишком далеко',
+    'other': 'Другая'
+  }
+  return errorNames[error] || 'Другая'
 }
 
 // API URL configuration for different environments
@@ -144,7 +163,7 @@ function PlayersPage() {
 
 function RoundsPage() {
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
-  const [course, setCourse] = useState('Home Course')
+  const [course, setCourse] = useState('МГК')
   const [courseType, setCourseType] = useState('championship')
   const [selectedPlayers, setSelectedPlayers] = useState([])
   const [created, setCreated] = useState(null)
@@ -253,7 +272,9 @@ function RoundsPage() {
 
       {created && (
         <div className="mt-6 space-y-3">
-          <div className="p-4 bg-green-50 border border-green-200 rounded-2xl">Создан раунд {created.id} — {created.course} ({created.date})</div>
+          <div className="p-4 bg-green-50 border border-green-200 rounded-2xl">
+            Создан раунд: {created.course} — {created.courseType === 'championship' ? 'Чемпионское' : 'Академическое'} ({created.date})
+          </div>
           <div className="flex gap-3">
             <button className="px-4 py-2 rounded-full bg-gray-900 text-white active:opacity-80" onClick={() => navigate(`/rounds/${created.id}/holes`)}>К лункам</button>
             <button className="px-4 py-2 rounded-full bg-indigo-700 text-white active:opacity-80" onClick={() => navigate(`/rounds/${created.id}/stats`)}>К статистике</button>
@@ -266,11 +287,13 @@ function RoundsPage() {
         {rounds.length === 0 && (
           <div className="p-4 text-sm text-gray-600">Нет раундов</div>
         )}
-        {rounds.map((r) => (
+        {rounds
+          .sort((a, b) => new Date(b.date) - new Date(a.date))
+          .map((r) => (
           <div key={r.id} className="p-4 flex items-center justify-between">
             <div>
-              <div className="font-medium">{r.course}</div>
-              <div className="text-sm text-gray-600">{r.id} — {r.date}</div>
+              <div className="font-medium">{r.course} — {r.courseType === 'championship' ? 'Чемпионское' : 'Академическое'}</div>
+              <div className="text-sm text-gray-600">{r.date}</div>
             </div>
             <div className="flex items-center gap-2">
               <Link className="px-4 py-2 rounded-full bg-gray-900 text-white active:opacity-80" to={`/rounds/${r.id}/holes`}>Лунки</Link>
@@ -313,13 +336,8 @@ function HolesList() {
           ← К раундам
         </Link>
         <h1 className="text-3xl font-semibold tracking-tight mt-2">
-          {round?.course || 'Раунд'} ({round?.date || id})
+          {round?.course || 'Раунд'} — {round?.courseType === 'championship' ? 'Чемпионское' : 'Академическое'} ({round?.date || id})
         </h1>
-        {round?.courseType && (
-          <p className="text-sm text-gray-600 mt-1">
-            {round.courseType === 'championship' ? 'Чемпионское поле (18 лунок)' : 'Академическое поле (9 лунок)'}
-          </p>
-        )}
       </div>
       
       <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
@@ -340,8 +358,9 @@ function HoleDetail() {
   const [club, setClub] = useState('7I')
   const [distance, setDistance] = useState(140)
   const [result, setResult] = useState('success')
-  const [location, setLocation] = useState('fairway')
+  const [location, setLocation] = useState('tee')
   const [targetLocation, setTargetLocation] = useState('fairway')
+  const [error, setError] = useState('ground')
   const [shots, setShots] = useState([])
   const [round, setRound] = useState(null)
   const [players, setPlayers] = useState([])
@@ -368,6 +387,22 @@ function HoleDetail() {
     })()
   }, [id, holeId])
 
+  // Update location when selected player changes
+  useEffect(() => {
+    if (selectedPlayer) {
+      // Check if this player has any shots on this hole
+      const playerShots = shots.filter(s => s.playerId === selectedPlayer)
+      if (playerShots.length === 0) {
+        // First shot for this player - set location to 'tee'
+        setLocation('tee')
+      } else {
+        // Not first shot - set location to last shot's target location
+        const lastShot = playerShots[playerShots.length - 1]
+        setLocation(lastShot.targetLocation)
+      }
+    }
+  }, [selectedPlayer, shots])
+
   // Get player color for styling
   const playerColor = players.find(p => p.id === selectedPlayer)?.color || '#3B82F6'
 
@@ -378,22 +413,55 @@ function HoleDetail() {
       return
     }
     
+    const shotData = { 
+      playerId: selectedPlayer,
+      club, 
+      distance: Number(distance), 
+      result, 
+      location,
+      targetLocation,
+      isPenalty: false
+    }
+    
+    // Add error field for failed shots
+    if (result === 'fail') {
+      shotData.error = error
+    }
+    
     const resp = await api(`/rounds/${id}/holes/${holeId}/shots`, {
       method: 'POST',
-      body: JSON.stringify({ 
-        playerId: selectedPlayer,
-        club, 
-        distance: Number(distance), 
-        result, 
-        location,
-        targetLocation
-      })
+      body: JSON.stringify(shotData)
     })
     setShots((prev) => [...prev, resp.shot])
     
     // Reset form for next shot
     setLocation(targetLocation)
     setTargetLocation('fairway')
+  }
+
+  async function addPenalty(e) {
+    e.preventDefault()
+    if (!selectedPlayer) {
+      alert('Выберите игрока')
+      return
+    }
+    
+    const penaltyData = { 
+      playerId: selectedPlayer,
+      club: 'PT', 
+      distance: 0, 
+      result: 'fail', 
+      location: 'other',
+      targetLocation: 'other',
+      error: 'other',
+      isPenalty: true
+    }
+    
+    const resp = await api(`/rounds/${id}/holes/${holeId}/shots`, {
+      method: 'POST',
+      body: JSON.stringify(penaltyData)
+    })
+    setShots((prev) => [...prev, resp.shot])
   }
 
   async function deleteLastShot() {
@@ -414,7 +482,7 @@ function HoleDetail() {
           to={`/rounds/${id}/holes`}
           className="text-blue-600 hover:text-blue-700 text-lg font-medium"
         >
-          ← {round?.course || 'Раунд'} ({round?.date || id})
+          ← {round?.course || 'Раунд'} — {round?.courseType === 'championship' ? 'Чемпионское' : 'Академическое'} ({round?.date || id})
         </Link>
         <h1 className="text-3xl font-semibold tracking-tight mt-2">Лунка {holeId}</h1>
       </div>
@@ -456,7 +524,7 @@ function HoleDetail() {
           <label className="flex flex-col text-sm gap-1">
             <span className="mb-1">Клюшка</span>
             <select value={club} onChange={(e) => setClub(e.target.value)} className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-              {['DR','3W','5W','3I','5I','6I','7I','8I','9I','PW','SW','LW','PT'].map((c) => (
+              {['DR','3W','5W','HY','3I','5I','6I','7I','8I','9I','PW','SW','LW','PT'].map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>
@@ -478,6 +546,7 @@ function HoleDetail() {
               <option value="left_woods">Левый лес</option>
               <option value="right_woods">Правый лес</option>
               <option value="green">Грин</option>
+              <option value="pre_green">Прегрин</option>
               <option value="other">Другое</option>
             </select>
           </label>
@@ -491,6 +560,9 @@ function HoleDetail() {
               <option value="left_woods">Левый лес</option>
               <option value="right_woods">Правый лес</option>
               <option value="green">Грин</option>
+              <option value="lake">Озеро</option>
+              <option value="pre_green">Прегрин</option>
+              <option value="hole">Лунка</option>
               <option value="other">Другое</option>
             </select>
           </label>
@@ -504,12 +576,46 @@ function HoleDetail() {
               <option value="fail">Неудачный</option>
             </select>
           </label>
+        </div>
+
+        {result === 'fail' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="flex flex-col text-sm gap-1">
+              <span className="mb-1">Ошибка</span>
+              <select 
+                value={error} 
+                onChange={(e) => setError(e.target.value)}
+                className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="ground">Земля</option>
+                <option value="top_shot">Удар сверху</option>
+                <option value="slice">Слайс</option>
+                <option value="hook">Хук</option>
+                <option value="shank">Срез вбок</option>
+                <option value="direction">Направление</option>
+                <option value="chunk">Зажал</option>
+                <option value="thin">Ребром</option>
+                <option value="too_far">Слишком далеко</option>
+                <option value="other">Другая</option>
+              </select>
+            </label>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <button 
             type="submit"
             className="rounded-full text-white px-4 py-3 shadow-sm active:opacity-80"
             style={{ backgroundColor: playerColor }}
           >
             Добавить удар
+          </button>
+          <button 
+            type="button"
+            onClick={addPenalty}
+            className="rounded-full bg-gray-900 text-white px-4 py-3 shadow-sm active:opacity-80"
+          >
+            Добавить штраф
           </button>
         </div>
       </form>
@@ -527,10 +633,13 @@ function HoleDetail() {
           )}
         </div>
         <ul className="space-y-2">
-          {shots.map((s) => {
+          {shots
+            .slice()
+            .reverse()
+            .map((s) => {
             const player = players.find(p => p.id === s.playerId)
             return (
-              <li key={s.shotNumber} className="bg-white border border-gray-200 p-3 rounded-2xl shadow-sm">
+              <li key={`${s.playerId}-${s.shotNumber}`} className={`bg-white border p-3 rounded-2xl shadow-sm ${s.isPenalty ? 'border-red-300 bg-red-50' : 'border-gray-200'}`}>
                 <div className="flex items-center gap-2 mb-1">
                   <div 
                     className="w-3 h-3 rounded-full" 
@@ -538,9 +647,21 @@ function HoleDetail() {
                   />
                   <span className="text-sm font-medium">{player?.name || 'Неизвестный'}</span>
                   <span className="text-sm text-gray-500">#{s.shotNumber}</span>
+                  {s.isPenalty && (
+                    <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full">Штраф</span>
+                  )}
                 </div>
                 <div className="text-sm">
-                  {s.club} — {s.distance}м — {getLocationName(s.location)} → {getLocationName(s.targetLocation)} — {s.result === 'success' ? 'Удачный' : 'Неудачный'}
+                  {s.isPenalty ? (
+                    <span className="text-red-700">Штрафной удар</span>
+                  ) : (
+                    <>
+                      {s.club} — {s.distance}м — {getLocationName(s.location)} → {getLocationName(s.targetLocation)} — {s.result === 'success' ? 'Удачный' : 'Неудачный'}
+                      {s.error && (
+                        <span className="text-red-600 ml-2">({getErrorName(s.error)})</span>
+                      )}
+                    </>
+                  )}
                 </div>
               </li>
             )
