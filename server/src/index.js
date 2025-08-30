@@ -1,6 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 import { nanoid } from 'nanoid';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -16,6 +21,12 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json());
+
+// Serve static files from client build in production
+if (NODE_ENV === 'production') {
+  const clientPath = path.join(__dirname, '../../client/dist');
+  app.use(express.static(clientPath));
+}
 
 // In-memory data storage
 /**
@@ -45,8 +56,9 @@ function getRoundOr404(req, res) {
   return round;
 }
 
+// API Routes
 // POST /rounds — create new round
-app.post('/rounds', (req, res) => {
+app.post('/api/rounds', (req, res) => {
   const { date, course } = req.body || {};
   if (!date || !course) {
     return res.status(400).json({ error: 'Missing required fields: date, course' });
@@ -58,20 +70,20 @@ app.post('/rounds', (req, res) => {
 });
 
 // GET /rounds — list all rounds (without holes details to keep payload small)
-app.get('/rounds', (_req, res) => {
+app.get('/api/rounds', (_req, res) => {
   const list = Array.from(rounds.values()).map((r) => ({ id: r.id, date: r.date, course: r.course }));
   res.json(list);
 });
 
 // GET /rounds/:id — get round by id
-app.get('/rounds/:id', (req, res) => {
+app.get('/api/rounds/:id', (req, res) => {
   const round = getRoundOr404(req, res);
   if (!round) return; // response already sent
   res.json(round);
 });
 
 // POST /rounds/:id/holes/:holeId/shots — add shot
-app.post('/rounds/:id/holes/:holeId/shots', (req, res) => {
+app.post('/api/rounds/:id/holes/:holeId/shots', (req, res) => {
   const round = getRoundOr404(req, res);
   if (!round) return;
 
@@ -131,20 +143,20 @@ function computeClubStats(round) {
 }
 
 // GET /rounds/:id/stats — overall stats
-app.get('/rounds/:id/stats', (req, res) => {
+app.get('/api/rounds/:id/stats', (req, res) => {
   const round = getRoundOr404(req, res);
   if (!round) return;
   res.json(computeRoundStats(round));
 });
 
 // GET /rounds/:id/stats/clubs — per-club stats
-app.get('/rounds/:id/stats/clubs', (req, res) => {
+app.get('/api/rounds/:id/stats/clubs', (req, res) => {
   const round = getRoundOr404(req, res);
   if (!round) return;
   res.json(computeClubStats(round));
 });
 
-app.get('/', (_req, res) => {
+app.get('/api', (_req, res) => {
   res.json({ 
     status: 'ok', 
     service: 'glf-stat server',
@@ -153,7 +165,7 @@ app.get('/', (_req, res) => {
   });
 });
 
-app.get('/health', (_req, res) => {
+app.get('/api/health', (_req, res) => {
   res.json({ 
     status: 'healthy',
     uptime: process.uptime(),
@@ -162,10 +174,17 @@ app.get('/health', (_req, res) => {
   });
 });
 
+// Serve React app for all other routes
+if (NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(clientPath, 'index.html'));
+  });
+}
+
 app.listen(PORT, () => {
   console.log(`🚀 Server listening on http://localhost:${PORT}`);
   console.log(`🌍 Environment: ${NODE_ENV}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
+  console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
 });
 
 
