@@ -1,16 +1,45 @@
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
 
+function getLocationName(location) {
+  const locationNames = {
+    'tee': 'Ти',
+    'left_rough': 'Левый раф',
+    'right_rough': 'Правый раф',
+    'fairway': 'Файервэй',
+    'left_woods': 'Левый лес',
+    'right_woods': 'Правый лес',
+    'green': 'Грин',
+    'other': 'Другое'
+  }
+  return locationNames[location] || 'Другое'
+}
+
 // API URL configuration for different environments
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api'
 
+// Debug: log API URL in development
+if (import.meta.env.DEV) {
+  console.log('🔗 API URL:', API_URL)
+  console.log('🌍 Environment:', import.meta.env.MODE)
+  console.log('📦 VITE_API_URL:', import.meta.env.VITE_API_URL)
+}
+
 async function api(path, options) {
-  const res = await fetch(`${API_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  })
-  if (!res.ok) throw new Error(`API ${res.status}`)
-  return res.json()
+  try {
+    const res = await fetch(`${API_URL}${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options,
+    })
+    if (!res.ok) {
+      console.error(`❌ API Error: ${res.status} ${res.statusText} for ${API_URL}${path}`)
+      throw new Error(`API ${res.status}: ${res.statusText}`)
+    }
+    return res.json()
+  } catch (error) {
+    console.error(`❌ API Request failed: ${API_URL}${path}`, error)
+    throw error
+  }
 }
 
 function Layout({ children }) {
@@ -20,6 +49,8 @@ function Layout({ children }) {
         <div className="mx-auto max-w-screen-sm px-4 py-3 flex items-center gap-3" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
           <div className="iOS-notch w-2 h-6" />
           <Link className="font-semibold text-gray-900" to="/">GLF Stat</Link>
+          <div className="flex-1" />
+          <Link className="text-blue-600 text-sm" to="/players">Игроки</Link>
         </div>
       </nav>
       <main className="mx-auto max-w-screen-sm px-4 py-4" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}>{children}</main>
@@ -27,19 +58,110 @@ function Layout({ children }) {
   )
 }
 
+function PlayersPage() {
+  const [name, setName] = useState('')
+  const [color, setColor] = useState('#3B82F6')
+  const [players, setPlayers] = useState([])
+
+  async function createPlayer(e) {
+    e.preventDefault()
+    await api('/players', {
+      method: 'POST',
+      body: JSON.stringify({ name, color })
+    })
+    setName('')
+    setColor('#3B82F6')
+    // refresh list
+    const list = await api('/players')
+    setPlayers(list)
+  }
+
+  async function deletePlayer(id) {
+    await api(`/players/${id}`, {
+      method: 'DELETE'
+    })
+    // refresh list
+    const list = await api('/players')
+    setPlayers(list)
+  }
+
+  useEffect(() => {
+    (async () => {
+      const list = await api('/players')
+      setPlayers(list)
+    })()
+  }, [])
+
+  return (
+    <Layout>
+      <h1 className="text-3xl font-semibold tracking-tight mb-4">Игроки</h1>
+      <form onSubmit={createPlayer} className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
+        <label className="flex flex-col text-sm gap-1">
+          <span className="mb-1">Имя</span>
+          <input 
+            type="text" 
+            value={name} 
+            onChange={(e) => setName(e.target.value)} 
+            className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+          />
+        </label>
+        <label className="flex flex-col text-sm gap-1">
+          <span className="mb-1">Цвет</span>
+          <input 
+            type="color" 
+            value={color} 
+            onChange={(e) => setColor(e.target.value)} 
+            className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 h-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
+          />
+        </label>
+        <button className="rounded-full bg-blue-600 text-white px-4 py-3 shadow-sm active:opacity-80">Добавить</button>
+      </form>
+
+      <h2 className="text-xl font-semibold mt-8 mb-2">Список игроков</h2>
+      <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm divide-y">
+        {players.length === 0 && (
+          <div className="p-4 text-sm text-gray-600">Нет игроков</div>
+        )}
+        {players.map((player) => (
+          <div key={player.id} className="p-4 flex items-center gap-3">
+            <div 
+              className="w-4 h-4 rounded-full" 
+              style={{ backgroundColor: player.color }}
+            />
+            <span className="flex-1">{player.name}</span>
+            <button 
+              onClick={() => deletePlayer(player.id)}
+              className="text-red-600 hover:text-red-700 text-sm"
+            >
+              Удалить
+            </button>
+          </div>
+        ))}
+      </div>
+    </Layout>
+  )
+}
+
 function RoundsPage() {
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [course, setCourse] = useState('Home Course')
+  const [courseType, setCourseType] = useState('championship')
+  const [selectedPlayers, setSelectedPlayers] = useState([])
   const [created, setCreated] = useState(null)
   const [rounds, setRounds] = useState([])
+  const [players, setPlayers] = useState([])
 
   const navigate = useNavigate()
 
   async function createRound(e) {
     e.preventDefault()
+    if (selectedPlayers.length === 0) {
+      alert('Выберите хотя бы одного игрока')
+      return
+    }
     const round = await api('/rounds', {
       method: 'POST',
-      body: JSON.stringify({ date, course })
+      body: JSON.stringify({ date, course, courseType, playerIds: selectedPlayers })
     })
     setCreated(round)
     // refresh list
@@ -47,26 +169,86 @@ function RoundsPage() {
     setRounds(list)
   }
 
+  function togglePlayer(playerId) {
+    setSelectedPlayers(prev => 
+      prev.includes(playerId) 
+        ? prev.filter(id => id !== playerId)
+        : [...prev, playerId]
+    )
+  }
+
   useEffect(() => {
     (async () => {
-      const list = await api('/rounds')
-      setRounds(list)
+      const [roundsList, playersList] = await Promise.all([
+        api('/rounds'),
+        api('/players')
+      ])
+      setRounds(roundsList)
+      setPlayers(playersList)
     })()
   }, [])
 
   return (
     <Layout>
       <h1 className="text-3xl font-semibold tracking-tight mb-4">Раунды</h1>
-      <form onSubmit={createRound} className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
-        <label className="flex flex-col text-sm gap-1">
-          <span className="mb-1">Дата</span>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-        </label>
-        <label className="flex flex-col text-sm sm:col-span-2 gap-1">
-          <span className="mb-1">Поле</span>
-          <input type="text" value={course} onChange={(e) => setCourse(e.target.value)} className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-        </label>
-        <button className="rounded-full bg-blue-600 text-white px-4 py-3 sm:col-span-3 shadow-sm active:opacity-80">Создать</button>
+      <form onSubmit={createRound} className="space-y-4 bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <label className="flex flex-col text-sm gap-1">
+            <span className="mb-1">Дата</span>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+          </label>
+          <label className="flex flex-col text-sm gap-1">
+            <span className="mb-1">Название поля</span>
+            <input type="text" value={course} onChange={(e) => setCourse(e.target.value)} className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+          </label>
+          <label className="flex flex-col text-sm gap-1">
+            <span className="mb-1">Тип поля</span>
+            <select 
+              value={courseType} 
+              onChange={(e) => setCourseType(e.target.value)}
+              className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="championship">Чемпионское (18 лунок)</option>
+              <option value="academic">Академическое (9 лунок)</option>
+            </select>
+          </label>
+        </div>
+        
+        <div>
+          <span className="text-sm font-medium mb-2 block">Игроки</span>
+          {players.length === 0 ? (
+            <div className="text-sm text-gray-500 p-3 bg-gray-50 rounded-xl">
+              Нет игроков. <Link to="/players" className="text-blue-600">Добавить игроков</Link>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              {players.map((player) => (
+                <button
+                  key={player.id}
+                  type="button"
+                  onClick={() => togglePlayer(player.id)}
+                  className={`p-3 rounded-xl border-2 transition-colors ${
+                    selectedPlayers.includes(player.id)
+                      ? 'border-blue-500 bg-blue-50'
+                      : 'border-gray-200 bg-gray-50'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <div 
+                      className="w-3 h-3 rounded-full" 
+                      style={{ backgroundColor: player.color }}
+                    />
+                    <span className="text-sm">{player.name}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        
+        <button className="w-full rounded-full bg-blue-600 text-white px-4 py-3 shadow-sm active:opacity-80">
+          Создать раунд
+        </button>
       </form>
 
       {created && (
@@ -104,10 +286,42 @@ function RoundsPage() {
 
 function HolesList() {
   const { id } = useParams()
-  const holes = useMemo(() => Array.from({ length: 18 }, (_, i) => i + 1), [])
+  const [round, setRound] = useState(null)
+  const holes = useMemo(() => {
+    const maxHoles = round?.courseType === 'academic' ? 9 : 18
+    return Array.from({ length: maxHoles }, (_, i) => i + 1)
+  }, [round?.courseType])
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const roundData = await api(`/rounds/${id}`)
+        setRound(roundData)
+      } catch (error) {
+        console.error('Failed to load round data:', error)
+      }
+    })()
+  }, [id])
+
   return (
     <Layout>
-      <h1 className="text-3xl font-semibold tracking-tight mb-4">Раунд {id}: Лунки</h1>
+      <div className="mb-4">
+        <Link 
+          to="/"
+          className="text-blue-600 hover:text-blue-700 text-lg font-medium"
+        >
+          ← К раундам
+        </Link>
+        <h1 className="text-3xl font-semibold tracking-tight mt-2">
+          {round?.course || 'Раунд'} ({round?.date || id})
+        </h1>
+        {round?.courseType && (
+          <p className="text-sm text-gray-600 mt-1">
+            {round.courseType === 'championship' ? 'Чемпионское поле (18 лунок)' : 'Академическое поле (9 лунок)'}
+          </p>
+        )}
+      </div>
+      
       <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
         {holes.map((n) => (
           <Link key={n} className="p-3 text-center rounded-2xl border border-gray-200 bg-white hover:bg-gray-50 shadow-sm" to={`/rounds/${id}/holes/${n}`}>{n}</Link>
@@ -122,55 +336,219 @@ function HolesList() {
 
 function HoleDetail() {
   const { id, holeId } = useParams()
+  const [selectedPlayer, setSelectedPlayer] = useState('')
   const [club, setClub] = useState('7I')
   const [distance, setDistance] = useState(140)
   const [result, setResult] = useState('success')
+  const [location, setLocation] = useState('fairway')
+  const [targetLocation, setTargetLocation] = useState('fairway')
   const [shots, setShots] = useState([])
+  const [round, setRound] = useState(null)
+  const [players, setPlayers] = useState([])
+
+  // Load round data and shots
+  useEffect(() => {
+    (async () => {
+      try {
+        const [roundData, playersData] = await Promise.all([
+          api(`/rounds/${id}`),
+          api('/players')
+        ])
+        setRound(roundData)
+        setPlayers(playersData)
+        setShots(roundData.holes[holeId] || [])
+        
+        // Set first player as default if available
+        if (roundData.players && roundData.players.length > 0 && !selectedPlayer) {
+          setSelectedPlayer(roundData.players[0])
+        }
+      } catch (error) {
+        console.error('Failed to load data:', error)
+      }
+    })()
+  }, [id, holeId])
+
+  // Get player color for styling
+  const playerColor = players.find(p => p.id === selectedPlayer)?.color || '#3B82F6'
 
   async function addShot(e) {
     e.preventDefault()
+    if (!selectedPlayer) {
+      alert('Выберите игрока')
+      return
+    }
+    
     const resp = await api(`/rounds/${id}/holes/${holeId}/shots`, {
       method: 'POST',
-      body: JSON.stringify({ club, distance: Number(distance), result })
+      body: JSON.stringify({ 
+        playerId: selectedPlayer,
+        club, 
+        distance: Number(distance), 
+        result, 
+        location,
+        targetLocation
+      })
     })
     setShots((prev) => [...prev, resp.shot])
+    
+    // Reset form for next shot
+    setLocation(targetLocation)
+    setTargetLocation('fairway')
+  }
+
+  async function deleteLastShot() {
+    try {
+      await api(`/rounds/${id}/holes/${holeId}/shots/last`, {
+        method: 'DELETE'
+      })
+      setShots((prev) => prev.slice(0, -1))
+    } catch (error) {
+      console.error('Failed to delete last shot:', error)
+    }
   }
 
   return (
     <Layout>
-      <h1 className="text-3xl font-semibold tracking-tight mb-4">Раунд {id} — Лунка {holeId}</h1>
-      <form onSubmit={addShot} className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-white p-4 rounded-2xl border border-gray-200 shadow-sm">
-        <label className="flex flex-col text-sm gap-1">
-          <span className="mb-1">Клюшка</span>
-          <select value={club} onChange={(e) => setClub(e.target.value)} className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-            {['DR','3W','5W','3I','5I','6I','7I','8I','9I','PW','SW','LW','PT'].map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col text-sm gap-1">
-          <span className="mb-1">Дистанция (м)</span>
-          <input type="number" value={distance} onChange={(e) => setDistance(e.target.value)} className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-        </label>
-        <label className="flex flex-col text-sm gap-1">
-          <span className="mb-1">Результат</span>
-          <select value={result} onChange={(e) => setResult(e.target.value)} className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-            <option value="success">Удачный</option>
-            <option value="fail">Неудачный</option>
-          </select>
-        </label>
-        <button className="rounded-full bg-blue-600 text-white px-4 py-3 shadow-sm active:opacity-80">Добавить удар</button>
+      <div className="mb-4">
+        <Link 
+          to={`/rounds/${id}/holes`}
+          className="text-blue-600 hover:text-blue-700 text-lg font-medium"
+        >
+          ← {round?.course || 'Раунд'} ({round?.date || id})
+        </Link>
+        <h1 className="text-3xl font-semibold tracking-tight mt-2">Лунка {holeId}</h1>
+      </div>
+      
+      {round && (
+        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl">
+          <div className="text-sm text-blue-800">
+            <strong>Игроки:</strong> {round.players?.map(playerId => {
+              const player = players.find(p => p.id === playerId)
+              return player ? (
+                <span key={playerId} className="inline-flex items-center gap-1 ml-2">
+                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: player.color }} />
+                  {player.name}
+                </span>
+              ) : null
+            })}
+          </div>
+        </div>
+      )}
+
+      <form onSubmit={addShot} className="space-y-4 bg-white p-4 rounded-2xl border border-gray-200 shadow-sm" style={{ borderColor: playerColor }}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="flex flex-col text-sm gap-1">
+            <span className="mb-1">Игрок</span>
+            <select 
+              value={selectedPlayer} 
+              onChange={(e) => setSelectedPlayer(e.target.value)}
+              className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">Выберите игрока</option>
+              {round?.players?.map(playerId => {
+                const player = players.find(p => p.id === playerId)
+                return player ? (
+                  <option key={playerId} value={playerId}>{player.name}</option>
+                ) : null
+              })}
+            </select>
+          </label>
+          <label className="flex flex-col text-sm gap-1">
+            <span className="mb-1">Клюшка</span>
+            <select value={club} onChange={(e) => setClub(e.target.value)} className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+              {['DR','3W','5W','3I','5I','6I','7I','8I','9I','PW','SW','LW','PT'].map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <label className="flex flex-col text-sm gap-1">
+            <span className="mb-1">Дистанция (м)</span>
+            <input type="number" value={distance} onChange={(e) => setDistance(e.target.value)} className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+          </label>
+          <label className="flex flex-col text-sm gap-1">
+            <span className="mb-1">Откуда</span>
+            <select value={location} onChange={(e) => setLocation(e.target.value)} className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+              <option value="tee">Ти</option>
+              <option value="left_rough">Левый раф</option>
+              <option value="right_rough">Правый раф</option>
+              <option value="fairway">Файервэй</option>
+              <option value="left_woods">Левый лес</option>
+              <option value="right_woods">Правый лес</option>
+              <option value="green">Грин</option>
+              <option value="other">Другое</option>
+            </select>
+          </label>
+          <label className="flex flex-col text-sm gap-1">
+            <span className="mb-1">Куда попал</span>
+            <select value={targetLocation} onChange={(e) => setTargetLocation(e.target.value)} className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+              <option value="tee">Ти</option>
+              <option value="left_rough">Левый раф</option>
+              <option value="right_rough">Правый раф</option>
+              <option value="fairway">Файервэй</option>
+              <option value="left_woods">Левый лес</option>
+              <option value="right_woods">Правый лес</option>
+              <option value="green">Грин</option>
+              <option value="other">Другое</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="flex flex-col text-sm gap-1">
+            <span className="mb-1">Результат</span>
+            <select value={result} onChange={(e) => setResult(e.target.value)} className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+              <option value="success">Удачный</option>
+              <option value="fail">Неудачный</option>
+            </select>
+          </label>
+          <button 
+            type="submit"
+            className="rounded-full text-white px-4 py-3 shadow-sm active:opacity-80"
+            style={{ backgroundColor: playerColor }}
+          >
+            Добавить удар
+          </button>
+        </div>
       </form>
 
       <div className="mt-6">
-        <h2 className="font-semibold mb-2">Удары</h2>
+        <div className="flex justify-between items-center mb-2">
+          <h2 className="font-semibold">Удары</h2>
+          {shots.length > 0 && (
+            <button 
+              onClick={deleteLastShot}
+              className="text-red-600 hover:text-red-700 text-sm font-medium px-3 py-1 rounded-lg border border-red-200 hover:bg-red-50 transition-colors"
+            >
+              Удалить последний
+            </button>
+          )}
+        </div>
         <ul className="space-y-2">
-          {shots.map((s) => (
-            <li key={s.shotNumber} className="bg-white border border-gray-200 p-3 rounded-2xl shadow-sm">
-              #{s.shotNumber}: {s.club} — {s.distance}м — {s.result === 'success' ? 'Удачный' : 'Неудачный'}
-            </li>
-          ))}
+          {shots.map((s) => {
+            const player = players.find(p => p.id === s.playerId)
+            return (
+              <li key={s.shotNumber} className="bg-white border border-gray-200 p-3 rounded-2xl shadow-sm">
+                <div className="flex items-center gap-2 mb-1">
+                  <div 
+                    className="w-3 h-3 rounded-full" 
+                    style={{ backgroundColor: player?.color || '#3B82F6' }}
+                  />
+                  <span className="text-sm font-medium">{player?.name || 'Неизвестный'}</span>
+                  <span className="text-sm text-gray-500">#{s.shotNumber}</span>
+                </div>
+                <div className="text-sm">
+                  {s.club} — {s.distance}м — {getLocationName(s.location)} → {getLocationName(s.targetLocation)} — {s.result === 'success' ? 'Удачный' : 'Неудачный'}
+                </div>
+              </li>
+            )
+          })}
         </ul>
+        {shots.length === 0 && (
+          <p className="text-gray-500 text-center py-4">Нет ударов</p>
+        )}
       </div>
     </Layout>
   )
@@ -182,13 +560,16 @@ function StatsPage() {
   const { id } = useParams()
   const [roundStats, setRoundStats] = useState(null)
   const [clubs, setClubs] = useState([])
+  const [locations, setLocations] = useState([])
 
   useEffect(() => {
     (async () => {
       const rs = await api(`/rounds/${id}/stats`)
       const cs = await api(`/rounds/${id}/stats/clubs`)
+      const ls = await api(`/rounds/${id}/stats/locations`)
       setRoundStats(rs)
       setClubs(cs)
+      setLocations(ls)
     })()
   }, [id])
 
@@ -199,7 +580,15 @@ function StatsPage() {
 
   return (
     <Layout>
-      <h1 className="text-3xl font-semibold tracking-tight mb-4">Статистика раунда {id}</h1>
+      <div className="mb-4">
+        <Link 
+          to={`/rounds/${id}/holes`}
+          className="text-blue-600 hover:text-blue-700 text-lg font-medium"
+        >
+          ← К лункам
+        </Link>
+        <h1 className="text-3xl font-semibold tracking-tight mt-2">Статистика</h1>
+      </div>
       {roundStats && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
@@ -255,6 +644,46 @@ function StatsPage() {
         </div>
       )}
 
+      {locations.length > 0 && (
+        <div className="mt-6">
+          <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
+            <h2 className="font-semibold mb-2">Статистика по местам ударов</h2>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="text-left border-b border-gray-200">
+                    <th className="py-2 pr-4">Место</th>
+                    <th className="py-2 pr-4">Удары</th>
+                    <th className="py-2 pr-4">Средняя дистанция</th>
+                    <th className="py-2 pr-4">% Успеха</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {locations.map((l) => (
+                    <tr key={l.location} className="border-b border-gray-100">
+                      <td className="py-2 pr-4">{getLocationName(l.location)}</td>
+                      <td className="py-2 pr-4">{l.shots}</td>
+                      <td className="py-2 pr-4">{l.avgDistance} м</td>
+                      <td className="py-2 pr-4">{l.successPercent}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="h-56 md:h-64 mt-4">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={locations}>
+                  <XAxis dataKey="location" tickFormatter={getLocationName} />
+                  <YAxis />
+                  <Tooltip labelFormatter={getLocationName} />
+                  <Bar dataKey="successPercent" fill="#16a34a" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mt-4">
         <Link className="text-blue-700" to={`/rounds/${id}/holes`}>К лункам</Link>
       </div>
@@ -267,6 +696,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<RoundsPage />} />
+        <Route path="/players" element={<PlayersPage />} />
         <Route path="/rounds/:id/holes" element={<HolesList />} />
         <Route path="/rounds/:id/holes/:holeId" element={<HoleDetail />} />
         <Route path="/rounds/:id/stats" element={<StatsPage />} />
