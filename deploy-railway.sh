@@ -38,6 +38,10 @@ if ! railway project &> /dev/null; then
     railway init
 fi
 
+# Link to existing project if not linked
+echo "🔗 Linking to Railway project..."
+railway link
+
 # Deploy to Railway
 echo "🚀 Deploying to Railway..."
 railway up

@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
 
-const APP_VERSION = '0.28.154606';
+const APP_VERSION = '0.31.160959';
 
 function getLocationName(location) {
   const locationNames = {
