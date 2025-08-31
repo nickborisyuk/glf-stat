@@ -37,7 +37,7 @@ function getErrorName(error) {
 }
 
 // API URL configuration for different environments
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000/api'
+const API_URL = import.meta.env.VITE_API_URL || '/.netlify/functions/api'
 
 // Debug: log API URL in development
 if (import.meta.env.DEV) {

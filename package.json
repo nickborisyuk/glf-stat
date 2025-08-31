@@ -1,22 +1,15 @@
 {
-  "name": "glf-stat-server",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "main": "src/index.js",
+  "name": "glf-stat",
+  "version": "1.0.0",
   "scripts": {
-    "dev": "node src/index.js",
-    "start": "NODE_ENV=production node src/index.js",
-    "build": "echo 'No build step needed for Node.js'"
+    "update-version": "node update-version.js",
+    "deploy": "./deploy-netlify.sh",
+    "build": "cd client && npm install && npm run build",
+    "dev": "cd client && npm run dev",
+    "install-all": "npm install && cd client && npm install && cd netlify/functions && npm install"
   },
-  "dependencies": {
-    "cors": "^2.8.5",
-    "express": "^4.19.2",
-    "nanoid": "^5.0.7"
-  },
-  "engines": {
-    "node": ">=18.0.0"
+  "dependencies": {},
+  "devDependencies": {
+    "netlify-cli": "^17.0.0"
   }
 }
-
-
