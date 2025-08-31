@@ -5,6 +5,9 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+// API Version - will be updated by update-version.js
+const API_VERSION = '0.28.154606';
+
 const app = express();
 const PORT = process.env.PORT || 4000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -19,6 +22,20 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.use(express.json());
+
+// Add cache-busting headers to all responses
+app.use((req, res, next) => {
+  res.set({
+    'Cache-Control': 'no-cache, no-store, must-revalidate, private',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+    'Surrogate-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'X-XSS-Protection': '1; mode=block'
+  });
+  next();
+});
 
 // File-based data storage
 const __filename = fileURLToPath(import.meta.url);
@@ -101,7 +118,10 @@ let players = new Map();
 function createEmptyHoles(courseType = 'championship') {
   const holes = {};
   const maxHoles = courseType === 'academic' ? 9 : 18;
-  for (let i = 1; i <= maxHoles; i += 1) holes[String(i)] = [];
+  for (let i = 1; i <= maxHoles; i += 1) {
+    holes[String(i)] = [];
+  }
+  console.log(`Creating ${maxHoles} holes for course type: ${courseType}`);
   return holes;
 }
 
@@ -133,6 +153,22 @@ app.post('/api/players', async (req, res) => {
 
 // GET /players — list all players
 app.get('/api/players', async (_req, res) => {
+  // Force reload data from file to avoid caching issues
+  const freshData = await loadData();
+  players = freshData.players;
+  rounds = freshData.rounds;
+  
+  // Set aggressive cache headers
+  res.set({
+    'Cache-Control': 'no-cache, no-store, must-revalidate, private',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+    'Surrogate-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'X-XSS-Protection': '1; mode=block'
+  });
+  
   const list = Array.from(players.values());
   res.json(list);
 });
@@ -177,12 +213,33 @@ app.post('/api/rounds', async (req, res) => {
 
 // GET /rounds — list all rounds (without holes details to keep payload small)
 app.get('/api/rounds', async (_req, res) => {
+  // Force reload data from file to avoid caching issues
+  const freshData = await loadData();
+  players = freshData.players;
+  rounds = freshData.rounds;
+  
+  // Set aggressive cache headers
+  res.set({
+    'Cache-Control': 'no-cache, no-store, must-revalidate, private',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+    'Surrogate-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'X-XSS-Protection': '1; mode=block'
+  });
+  
   const list = Array.from(rounds.values()).map((r) => ({ id: r.id, date: r.date, course: r.course }));
   res.json(list);
 });
 
 // GET /rounds/:id — get round by id
 app.get('/api/rounds/:id', async (req, res) => {
+  // Force reload data from file to avoid caching issues
+  const freshData = await loadData();
+  players = freshData.players;
+  rounds = freshData.rounds;
+  
   const round = getRoundOr404(req, res);
   if (!round) return; // response already sent
   res.json(round);
@@ -275,6 +332,39 @@ app.delete('/api/rounds/:id/holes/:holeId/shots/last', async (req, res) => {
     message: 'Last shot deleted successfully',
     deletedShot,
     remainingShots: shots.length 
+  });
+});
+
+// PUT /rounds/:id/holes/:holeId/shots/:shotNumber — update shot
+app.put('/api/rounds/:id/holes/:holeId/shots/:shotNumber', async (req, res) => {
+  const round = getRoundOr404(req, res);
+  if (!round) return;
+
+  const { holeId, shotNumber } = req.params;
+  const { playerId } = req.body;
+  
+  if (!round.holes[holeId]) {
+    return res.status(400).json({ error: 'Invalid holeId. Must be 1-18' });
+  }
+
+  const shots = round.holes[holeId];
+  // Find shot by shotNumber AND playerId to handle separate numbering per player
+  const shotIndex = shots.findIndex(s => 
+    s.shotNumber === parseInt(shotNumber) && 
+    (!playerId || s.playerId === playerId)
+  );
+  
+  if (shotIndex === -1) {
+    return res.status(404).json({ error: 'Shot not found' });
+  }
+
+  const updatedShot = { ...shots[shotIndex], ...req.body };
+  shots[shotIndex] = updatedShot;
+  
+  await saveData(rounds, players);
+  return res.status(200).json({ 
+    message: 'Shot updated successfully',
+    shot: updatedShot
   });
 });
 
@@ -406,8 +496,72 @@ app.get('/api/health', (_req, res) => {
     status: 'healthy',
     uptime: process.uptime(),
     memory: process.memoryUsage(),
-    environment: NODE_ENV
+    environment: NODE_ENV,
+    version: API_VERSION
   });
+});
+
+app.get('/api/version', (_req, res) => {
+  res.json({ 
+    version: API_VERSION,
+    environment: NODE_ENV,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// POST /clear-all-data — clear all data (for testing)
+app.post('/api/clear-all-data', async (req, res) => {
+  try {
+    console.log('🧹 Clearing all data...');
+    console.log(`📊 Before clearing: ${rounds.size} rounds, ${players.size} players`);
+    
+    // Force reload data first to ensure we have the latest state
+    const freshData = await loadData();
+    rounds = freshData.rounds;
+    players = freshData.players;
+    
+    console.log(`📊 After reload: ${rounds.size} rounds, ${players.size} players`);
+    
+    rounds.clear();
+    players.clear();
+    
+    console.log(`📊 After clearing: ${rounds.size} rounds, ${players.size} players`);
+    
+    // Force delete the data file to ensure complete cleanup
+    try {
+      await fs.unlink(DATA_FILE);
+      console.log('🗑️ Data file deleted successfully');
+    } catch (unlinkError) {
+      console.log('⚠️ Could not delete data file (may not exist):', unlinkError.message);
+    }
+    
+    // Save empty data to create fresh file
+    await saveData(rounds, players);
+    console.log('✅ Empty data saved to file successfully');
+    
+    // Set aggressive cache headers
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate, private',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      'Surrogate-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'X-XSS-Protection': '1; mode=block'
+    });
+    
+    return res.json({ 
+      message: 'All data cleared successfully',
+      cleared: {
+        rounds: 0,
+        players: 0
+      },
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('❌ Failed to clear data:', error);
+    return res.status(500).json({ error: 'Failed to clear data' });
+  }
 });
 
 // Serve a simple HTML page for the root route
@@ -457,6 +611,15 @@ async function startServer() {
     rounds = data.rounds;
     players = data.players;
     console.log(`📊 Loaded ${rounds.size} rounds and ${players.size} players from storage`);
+    
+    // Clear old data if it exists (for development)
+    if (NODE_ENV === 'development' && (rounds.size > 0 || players.size > 0)) {
+      console.log('🧹 Clearing old data for fresh start...');
+      rounds.clear();
+      players.clear();
+      await saveData(rounds, players);
+      console.log('✅ Data cleared successfully');
+    }
   } catch (error) {
     console.error('❌ Error loading data:', error);
     rounds = new Map();

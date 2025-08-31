@@ -1,6 +1,11 @@
 {
   "name": "glf-stat",
   "version": "1.0.0",
-  "description": "Golf Statistics Tracking App",
+  "type": "module",
+  "description": "Golf Statistics Tracker",
+  "scripts": {
+    "update-version": "node update-version.js",
+    "deploy": "./deploy.sh"
+  },
   "private": true
 }

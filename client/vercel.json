@@ -5,6 +5,6 @@
   "installCommand": "npm install",
   "framework": "vite",
   "env": {
-    "VITE_API_URL": "https://glf-stat-8skuiuxmo-nick-borisyuks-projects.vercel.app/api"
+    "VITE_API_URL": "https://glf-stat-3ggiczt6n-nick-borisyuks-projects.vercel.app/api"
   }
 }

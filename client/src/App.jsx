@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Link, useParams, useNavigate } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
 
+const APP_VERSION = '0.28.154606';
+
 function getLocationName(location) {
   const locationNames = {
     'tee': 'Ти',
@@ -46,28 +48,59 @@ if (import.meta.env.DEV) {
 
 async function api(path, options) {
   try {
-    const res = await fetch(`${API_URL}${path}`, {
-      headers: { 'Content-Type': 'application/json' },
+    // Add cache-busting parameter for GET requests
+    let url = `${API_URL}${path}`
+    if (!options || options.method !== 'POST' && options.method !== 'PUT' && options.method !== 'DELETE') {
+      const separator = path.includes('?') ? '&' : '?'
+      url = `${url}${separator}_t=${Date.now()}`
+    }
+    
+    const res = await fetch(url, {
+      headers: { 
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      },
       ...options,
     })
     if (!res.ok) {
-      console.error(`❌ API Error: ${res.status} ${res.statusText} for ${API_URL}${path}`)
+      console.error(`❌ API Error: ${res.status} ${res.statusText} for ${url}`)
       throw new Error(`API ${res.status}: ${res.statusText}`)
     }
     return res.json()
   } catch (error) {
-    console.error(`❌ API Request failed: ${API_URL}${path}`, error)
+    console.error(`❌ API Request failed: ${url}`, error)
     throw error
   }
 }
 
+// Fetch API version
+async function fetchApiVersion() {
+  try {
+    const response = await api('/version');
+    return response.version;
+  } catch (error) {
+    console.error('Failed to fetch API version:', error);
+    return 'error';
+  }
+}
+
 function Layout({ children }) {
+  const [apiVersion, setApiVersion] = useState('...');
+
+  useEffect(() => {
+    fetchApiVersion().then(setApiVersion);
+  }, []);
+
   return (
     <div className="min-h-screen bg-gray-100 text-gray-900">
       <nav className="sticky top-0 z-10 backdrop-blur bg-white/80 border-b border-gray-200">
         <div className="mx-auto max-w-screen-sm px-4 py-3 flex items-center gap-3" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
           <div className="iOS-notch w-2 h-6" />
           <Link className="font-semibold text-gray-900" to="/">GLF Stat</Link>
+          <span className="text-xs text-gray-500 font-mono">v{APP_VERSION}</span>
+          <span className="text-xs text-gray-400 font-mono">API:{apiVersion}</span>
           <div className="flex-1" />
           <Link className="text-blue-600 text-sm" to="/players">Игроки</Link>
         </div>
@@ -80,7 +113,7 @@ function Layout({ children }) {
 function PlayersPage() {
   const [name, setName] = useState('')
   const [color, setColor] = useState('#3B82F6')
-  const [players, setPlayers] = useState([])
+  const [playersList, setPlayersList] = useState([])
 
   async function createPlayer(e) {
     e.preventDefault()
@@ -92,7 +125,7 @@ function PlayersPage() {
     setColor('#3B82F6')
     // refresh list
     const list = await api('/players')
-    setPlayers(list)
+    setPlayersList(list)
   }
 
   async function deletePlayer(id) {
@@ -101,13 +134,13 @@ function PlayersPage() {
     })
     // refresh list
     const list = await api('/players')
-    setPlayers(list)
+    setPlayersList(list)
   }
 
   useEffect(() => {
     (async () => {
       const list = await api('/players')
-      setPlayers(list)
+      setPlayersList(list)
     })()
   }, [])
 
@@ -126,22 +159,27 @@ function PlayersPage() {
         </label>
         <label className="flex flex-col text-sm gap-1">
           <span className="mb-1">Цвет</span>
-          <input 
-            type="color" 
+          <select 
             value={color} 
             onChange={(e) => setColor(e.target.value)} 
-            className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 h-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" 
-          />
+            className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          >
+            <option value="#EF4444">🔴 Красный</option>
+            <option value="#3B82F6">🔵 Синий</option>
+            <option value="#10B981">🟢 Зеленый</option>
+            <option value="#F97316">🟠 Оранжевый</option>
+            <option value="#8B5CF6">🟣 Фиолетовый</option>
+          </select>
         </label>
         <button className="rounded-full bg-blue-600 text-white px-4 py-3 shadow-sm active:opacity-80">Добавить</button>
       </form>
 
       <h2 className="text-xl font-semibold mt-8 mb-2">Список игроков</h2>
       <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm divide-y">
-        {players.length === 0 && (
+        {playersList.length === 0 && (
           <div className="p-4 text-sm text-gray-600">Нет игроков</div>
         )}
-        {players.map((player) => (
+        {playersList.map((player) => (
           <div key={player.id} className="p-4 flex items-center gap-3">
             <div 
               className="w-4 h-4 rounded-full" 
@@ -168,7 +206,7 @@ function RoundsPage() {
   const [selectedPlayers, setSelectedPlayers] = useState([])
   const [created, setCreated] = useState(null)
   const [rounds, setRounds] = useState([])
-  const [players, setPlayers] = useState([])
+  const [roundsPlayers, setRoundsPlayers] = useState([])
 
   const navigate = useNavigate()
 
@@ -178,14 +216,31 @@ function RoundsPage() {
       alert('Выберите хотя бы одного игрока')
       return
     }
-    const round = await api('/rounds', {
-      method: 'POST',
-      body: JSON.stringify({ date, course, courseType, playerIds: selectedPlayers })
-    })
-    setCreated(round)
-    // refresh list
-    const list = await api('/rounds')
-    setRounds(list)
+    
+    console.log('Creating round with data:', { date, course, courseType, playerIds: selectedPlayers })
+    
+    try {
+      const round = await api('/rounds', {
+        method: 'POST',
+        body: JSON.stringify({ date, course, courseType, playerIds: selectedPlayers })
+      })
+      console.log('Round created successfully:', round)
+      setCreated(round)
+      
+      // Clear form
+      setDate('')
+      setCourse('МГК')
+      setCourseType('championship')
+      setSelectedPlayers([])
+      
+      // refresh list
+      const list = await api('/rounds')
+      console.log('Updated rounds list:', list)
+      setRounds(list)
+    } catch (error) {
+      console.error('Error creating round:', error)
+      alert('Ошибка при создании раунда: ' + error.message)
+    }
   }
 
   function togglePlayer(playerId) {
@@ -203,7 +258,7 @@ function RoundsPage() {
         api('/players')
       ])
       setRounds(roundsList)
-      setPlayers(playersList)
+      setRoundsPlayers(playersList)
     })()
   }, [])
 
@@ -235,13 +290,13 @@ function RoundsPage() {
         
         <div>
           <span className="text-sm font-medium mb-2 block">Игроки</span>
-          {players.length === 0 ? (
+          {roundsPlayers.length === 0 ? (
             <div className="text-sm text-gray-500 p-3 bg-gray-50 rounded-xl">
               Нет игроков. <Link to="/players" className="text-blue-600">Добавить игроков</Link>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-2">
-              {players.map((player) => (
+              {roundsPlayers.map((player) => (
                 <button
                   key={player.id}
                   type="button"
@@ -363,23 +418,38 @@ function HoleDetail() {
   const [error, setError] = useState('ground')
   const [shots, setShots] = useState([])
   const [round, setRound] = useState(null)
-  const [players, setPlayers] = useState([])
+  const [holePlayers, setHolePlayers] = useState([])
+  const [isAutoMeasureEnabled, setIsAutoMeasureEnabled] = useState(false)
+  const [pendingMeasurements, setPendingMeasurements] = useState([])
+  const [measurementStartPositions, setMeasurementStartPositions] = useState({})
+  const [currentDistances, setCurrentDistances] = useState({})
+  const [watchId, setWatchId] = useState(null)
 
   // Load round data and shots
   useEffect(() => {
     (async () => {
       try {
+        console.log('Loading data for round:', id, 'hole:', holeId)
         const [roundData, playersData] = await Promise.all([
           api(`/rounds/${id}`),
           api('/players')
         ])
+        console.log('Round data loaded:', roundData)
+        console.log('Players data loaded:', playersData)
         setRound(roundData)
-        setPlayers(playersData)
+        
+        // Filter players to only show players in this round
+        const roundPlayers = playersData.filter(player => 
+          roundData.players && roundData.players.includes(player.id)
+        )
+        console.log('Round players:', roundPlayers)
+        setHolePlayers(roundPlayers)
         setShots(roundData.holes[holeId] || [])
         
         // Set first player as default if available
-        if (roundData.players && roundData.players.length > 0 && !selectedPlayer) {
-          setSelectedPlayer(roundData.players[0])
+        if (roundPlayers.length > 0 && !selectedPlayer) {
+          console.log('Setting default player:', roundPlayers[0].id)
+          setSelectedPlayer(roundPlayers[0].id)
         }
       } catch (error) {
         console.error('Failed to load data:', error)
@@ -403,8 +473,63 @@ function HoleDetail() {
     }
   }, [selectedPlayer, shots])
 
+  // Check if running on mobile device
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+
+  // Auto-enable measurement on mobile
+  useEffect(() => {
+    if (isMobile) {
+      setIsAutoMeasureEnabled(true)
+    }
+  }, [isMobile])
+
+  // Start watching position when there are pending measurements
+  useEffect(() => {
+    if (pendingMeasurements.length > 0 && navigator.geolocation) {
+      const id = navigator.geolocation.watchPosition(
+        (position) => {
+          const currentPos = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            timestamp: position.timestamp
+          }
+          
+          // Update distances for all pending measurements
+          const newDistances = {}
+          pendingMeasurements.forEach(measurement => {
+            const measurementKey = `${measurement.playerId}-${measurement.shotNumber}`
+            const startPos = measurementStartPositions[measurementKey]
+            if (startPos) {
+              const distance = calculateDistance(
+                startPos.lat, startPos.lng,
+                currentPos.lat, currentPos.lng
+              )
+              newDistances[measurementKey] = distance
+            }
+          })
+          
+          setCurrentDistances(prev => ({ ...prev, ...newDistances }))
+        },
+        (error) => {
+          console.error('Error watching position:', error)
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      )
+      setWatchId(id)
+    } else if (watchId) {
+      navigator.geolocation.clearWatch(watchId)
+      setWatchId(null)
+    }
+
+    return () => {
+      if (watchId) {
+        navigator.geolocation.clearWatch(watchId)
+      }
+    }
+  }, [pendingMeasurements, measurementStartPositions])
+
   // Get player color for styling
-  const playerColor = players.find(p => p.id === selectedPlayer)?.color || '#3B82F6'
+  const playerColor = holePlayers.find(p => p.id === selectedPlayer)?.color || '#3B82F6'
 
   async function addShot(e) {
     e.preventDefault()
@@ -416,7 +541,7 @@ function HoleDetail() {
     const shotData = { 
       playerId: selectedPlayer,
       club, 
-      distance: Number(distance), 
+      distance: isAutoMeasureEnabled ? 0 : Number(distance), 
       result, 
       location,
       targetLocation,
@@ -432,6 +557,30 @@ function HoleDetail() {
       method: 'POST',
       body: JSON.stringify(shotData)
     })
+    
+    // If auto-measure is enabled, save start position and add to pending measurements
+    if (isAutoMeasureEnabled && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const startPos = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            timestamp: position.timestamp
+          }
+          const measurementKey = `${resp.shot.playerId}-${resp.shot.shotNumber}`
+          setMeasurementStartPositions(prev => ({
+            ...prev,
+            [measurementKey]: startPos
+          }))
+          setPendingMeasurements(prev => [...prev, { playerId: resp.shot.playerId, shotNumber: resp.shot.shotNumber }])
+        },
+        (error) => {
+          console.error('Failed to get position for measurement:', error)
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      )
+    }
+    
     setShots((prev) => [...prev, resp.shot])
     
     // Reset form for next shot
@@ -457,11 +606,23 @@ function HoleDetail() {
       isPenalty: true
     }
     
+    console.log('Adding penalty:', penaltyData)
+    
     const resp = await api(`/rounds/${id}/holes/${holeId}/shots`, {
       method: 'POST',
       body: JSON.stringify(penaltyData)
     })
+    
+    console.log('Penalty response:', resp)
     setShots((prev) => [...prev, resp.shot])
+    
+    // Force reload shots data to ensure consistency
+    try {
+      const roundData = await api(`/rounds/${id}`)
+      setShots(roundData.holes[holeId] || [])
+    } catch (error) {
+      console.error('Failed to reload shots after penalty:', error)
+    }
   }
 
   async function deleteLastShot() {
@@ -473,6 +634,90 @@ function HoleDetail() {
     } catch (error) {
       console.error('Failed to delete last shot:', error)
     }
+  }
+
+  function handleDistanceMeasured(measuredDistance) {
+    setDistance(measuredDistance)
+  }
+
+  // Calculate distance between two points using Haversine formula
+  function calculateDistance(lat1, lng1, lat2, lng2) {
+    const R = 6371e3 // Earth's radius in meters
+    const φ1 = lat1 * Math.PI / 180
+    const φ2 = lat2 * Math.PI / 180
+    const Δφ = (lat2 - lat1) * Math.PI / 180
+    const Δλ = (lng2 - lng1) * Math.PI / 180
+
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ / 2) * Math.sin(Δλ / 2)
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+
+    return Math.round(R * c)
+  }
+
+  async function completeMeasurement(playerId, shotNumber) {
+    if (!navigator.geolocation) return
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const endPos = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          timestamp: position.timestamp
+        }
+        
+        const measurementKey = `${playerId}-${shotNumber}`
+        const startPos = measurementStartPositions[measurementKey]
+        if (!startPos) return
+
+        const distance = calculateDistance(
+          startPos.lat, startPos.lng,
+          endPos.lat, endPos.lng
+        )
+
+        // Update the shot with measured distance
+        try {
+          const updatedShot = shots.find(s => s.shotNumber === shotNumber && s.playerId === playerId)
+          if (updatedShot) {
+            // Only update the distance field, preserve all other data
+            await api(`/rounds/${id}/holes/${holeId}/shots/${shotNumber}`, {
+              method: 'PUT',
+              body: JSON.stringify({ 
+                distance: distance,
+                playerId: updatedShot.playerId 
+              })
+            })
+            
+            // Update local state - only change the distance for the specific shot
+            setShots(prev => prev.map(s => 
+              s.shotNumber === shotNumber && s.playerId === playerId
+                ? { ...s, distance } 
+                : s
+            ))
+          }
+        } catch (error) {
+          console.error('Failed to update shot distance:', error)
+        }
+
+        // Remove from pending measurements
+        setPendingMeasurements(prev => prev.filter(m => !(m.playerId === playerId && m.shotNumber === shotNumber)))
+        setMeasurementStartPositions(prev => {
+          const newPositions = { ...prev }
+          delete newPositions[measurementKey]
+          return newPositions
+        })
+        setCurrentDistances(prev => {
+          const newDistances = { ...prev }
+          delete newDistances[measurementKey]
+          return newDistances
+        })
+      },
+      (error) => {
+        console.error('Failed to get position for measurement completion:', error)
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
   }
 
   return (
@@ -491,7 +736,7 @@ function HoleDetail() {
         <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl">
           <div className="text-sm text-blue-800">
             <strong>Игроки:</strong> {round.players?.map(playerId => {
-              const player = players.find(p => p.id === playerId)
+              const player = holePlayers.find(p => p.id === playerId)
               return player ? (
                 <span key={playerId} className="inline-flex items-center gap-1 ml-2">
                   <div className="w-3 h-3 rounded-full" style={{ backgroundColor: player.color }} />
@@ -514,7 +759,7 @@ function HoleDetail() {
             >
               <option value="">Выберите игрока</option>
               {round?.players?.map(playerId => {
-                const player = players.find(p => p.id === playerId)
+                const player = holePlayers.find(p => p.id === playerId)
                 return player ? (
                   <option key={playerId} value={playerId}>{player.name}</option>
                 ) : null
@@ -532,10 +777,35 @@ function HoleDetail() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <label className="flex flex-col text-sm gap-1">
+          <div className="flex flex-col text-sm gap-1">
             <span className="mb-1">Дистанция (м)</span>
-            <input type="number" value={distance} onChange={(e) => setDistance(e.target.value)} className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-          </label>
+            <div className="flex gap-2">
+              <input 
+                type="number" 
+                value={distance} 
+                onChange={(e) => setDistance(e.target.value)} 
+                disabled={isAutoMeasureEnabled}
+                className={`flex-1 appearance-none rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                  isAutoMeasureEnabled 
+                    ? 'bg-gray-100 border border-gray-300 text-gray-500' 
+                    : 'bg-gray-50 border border-gray-200'
+                }`}
+              />
+              {isMobile && (
+                <button
+                  type="button"
+                  onClick={() => setIsAutoMeasureEnabled(!isAutoMeasureEnabled)}
+                  className={`px-3 py-2 rounded-xl text-sm font-medium ${
+                    isAutoMeasureEnabled
+                      ? 'bg-green-600 text-white hover:bg-green-700'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  📏
+                </button>
+              )}
+            </div>
+          </div>
           <label className="flex flex-col text-sm gap-1">
             <span className="mb-1">Откуда</span>
             <select value={location} onChange={(e) => setLocation(e.target.value)} className="appearance-none rounded-xl bg-gray-50 border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
@@ -637,7 +907,7 @@ function HoleDetail() {
             .slice()
             .reverse()
             .map((s) => {
-            const player = players.find(p => p.id === s.playerId)
+            const player = holePlayers.find(p => p.id === s.playerId)
             return (
               <li key={`${s.playerId}-${s.shotNumber}`} className={`bg-white border p-3 rounded-2xl shadow-sm ${s.isPenalty ? 'border-red-300 bg-red-50' : 'border-gray-200'}`}>
                 <div className="flex items-center gap-2 mb-1">
@@ -671,6 +941,31 @@ function HoleDetail() {
           <p className="text-gray-500 text-center py-4">Нет ударов</p>
         )}
       </div>
+
+
+
+      {/* Floating Measurement Buttons */}
+      {isAutoMeasureEnabled && pendingMeasurements.length > 0 && (
+        <div className="fixed top-20 right-4 z-40 space-y-2">
+          {pendingMeasurements.map((measurement) => {
+            const player = holePlayers.find(p => p.id === measurement.playerId)
+            const measurementKey = `${measurement.playerId}-${measurement.shotNumber}`
+            const currentDistance = currentDistances[measurementKey] || 0
+            return (
+              <button
+                key={measurementKey}
+                onClick={() => completeMeasurement(measurement.playerId, measurement.shotNumber)}
+                className="min-w-[60px] h-12 rounded-full text-white font-bold text-xs shadow-lg hover:shadow-xl transition-shadow flex flex-col items-center justify-center"
+                style={{ backgroundColor: player?.color || '#3B82F6' }}
+                title={`Завершить измерение удара #${measurement.shotNumber} (${player?.name || 'Неизвестный'})`}
+              >
+                <div>#{measurement.shotNumber}</div>
+                <div className="text-[10px] font-normal">{currentDistance}м</div>
+              </button>
+            )
+          })}
+        </div>
+      )}
     </Layout>
   )
 }
